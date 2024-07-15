@@ -2,6 +2,11 @@ provider "aws" {
   region = "us-east-1"
 }
 
+module "amazon-vpc-lattice-module_example_service" {
+  source  = "aws-ia/amazon-vpc-lattice-module/aws//examples/service"
+  version = "0.1.0"
+}
+
 resource "aws_vpc" "vpc-app-a" {
   cidr_block        = "10.0.0.0/23"
   enable_dns_support = true
@@ -269,5 +274,114 @@ resource "aws_instance" "ec2_instance-vpc-client" {
 
   tags = {
     Name = "ec2-instance-vpc-client"
+  }
+}
+
+# VPC Lattice Service Network
+resource "aws_vpclattice_service_network" "service_network" {
+  name = "lattice-service-network"
+
+  tags = {
+    Name = "lattice-service-network"
+  }
+}
+
+resource "aws_vpclattice_service" "service-app" {
+  name  = "service-app"
+  tags = {
+    Name = "service-app"
+  }
+}
+
+# VPC Lattice Target Groups
+resource "aws_vpclattice_target_group" "target_group-vpc-app-a" {
+  name  = "target-group-vpc-app-a"
+  type = "INSTANCE"
+
+  config {
+    vpc_identifier = aws_vpc.vpc-app-a.id
+
+    port     = 80
+    protocol = "HTTP"
+  }
+
+  tags = {
+    Name = "target-group-vpc-app-a"
+  }
+}
+
+resource "aws_vpclattice_target_group" "target_group-vpc-app-b" {
+  name  = "target-group-vpc-app-b"
+  type = "INSTANCE"
+
+  config {
+    vpc_identifier = aws_vpc.vpc-app-b.id
+
+    port     = 80
+    protocol = "HTTP"
+  }
+
+  tags = {
+    Name = "target-group-vpc-app-b"
+  }
+}
+
+# VPC Lattice Target Group Attachment
+resource "aws_vpclattice_target_group_attachment" "target-vpc-app-a" {
+  target_group_identifier    = aws_vpclattice_target_group.target_group-vpc-app-a.id
+
+  target {
+    id   = aws_instance.ec2_instance-vpc-a.id
+    port = 80
+  }
+}
+
+resource "aws_vpclattice_target_group_attachment" "target-vpc-app-b" {
+  target_group_identifier   = aws_vpclattice_target_group.target_group-vpc-app-b.id
+
+  target {
+    id   = aws_instance.ec2_instance-vpc-b.id
+    port = 80
+  }
+}
+
+# VPC Lattice Service Association
+resource "aws_vpclattice_service_network_service_association" "service_association-app" {
+  service_identifier           = aws_vpclattice_service.service-app.id
+  service_network_identifier   = aws_vpclattice_service_network.service_network.id
+
+  tags = {
+    Name = "service-association-app"
+  }
+}
+
+# VPC Lattice Service Network Association for VPC-CLIENT
+resource "aws_vpclattice_service_network_vpc_association" "service_network_association" {
+  service_network_identifier = aws_vpclattice_service_network.service_network.id
+  vpc_identifier             = aws_vpc.vpc-client.id
+  security_group_ids         = [ aws_security_group.instance_sg-vpc-client.id ]
+
+  tags = {
+    Name = "service-network-association-to-client"
+  }
+}
+
+#VPC Lattice Listener for App service
+resource "aws_vpclattice_listener" "service-app-listener" {
+  name               = "service-app-listener"
+  protocol           = "HTTP"
+  service_identifier = aws_vpclattice_service.service-app.id
+
+  default_action {
+    forward {
+      target_groups {
+        target_group_identifier = aws_vpclattice_target_group.target_group-vpc-app-a.id
+        weight                  = 80
+      }
+      target_groups {
+        target_group_identifier = aws_vpclattice_target_group.target_group-vpc-app-b.id
+        weight                  = 20
+      }
+    }
   }
 }
